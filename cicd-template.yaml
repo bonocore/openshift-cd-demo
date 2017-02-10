@@ -29,12 +29,6 @@ parameters:
   generate: expression
   name: POSTGRESQL_USER
   required: true
-- description: Password for Gogs Git Server PostgreSQL backend
-  displayName: Gogs' PostgreSQL Password
-  from: '[a-zA-Z0-9]{16}'
-  generate: expression
-  name: GOGS_POSTGRESQL_PASSWORD
-  required: true
 - description: Password for SonarQube Server PostgreSQL backend
   displayName: SonarQube's PostgreSQL Password
   from: '[a-zA-Z0-9]{16}'
@@ -59,7 +53,7 @@ objects:
     labels:
       app: cicd-pipeline
       name: cicd-pipeline
-    name: tasks-pipeline
+    name: shopping-pipeline
   spec:
     runPolicy: Serial
     source:
@@ -72,7 +66,7 @@ objects:
              def mvnCmd = "mvn -s configuration/cicd-settings.xml"
 
              stage 'Build'
-             git branch: 'eap-7', url: 'http://gogs:3000/gogs/openshift-tasks.git'
+             git url: 'http://gogs:3000/gogs/openshift-shopping.git'
              def v = version()
              sh "${mvnCmd} clean install -DskipTests=true"
 
@@ -92,28 +86,71 @@ objects:
 
              stage 'Deploy DEV'
              sh "rm -rf oc-build && mkdir -p oc-build/deployments"
-             sh "cp target/openshift-tasks.war oc-build/deployments/ROOT.war"
+             sh "cp target/openshift-shopping.war oc-build/deployments/ROOT.war"
              // clean up. keep the image stream
              sh "oc project ${DEV_PROJECT}"
-             sh "oc delete bc,dc,svc,route -l app=tasks -n ${DEV_PROJECT}"
+             sh "oc delete bc,dc,svc,route -l app=shopping -n ${DEV_PROJECT}"
              // create build. override the exit code since it complains about exising imagestream
-             sh "oc new-build --name=tasks --image-stream=jboss-eap70-openshift --binary=true --labels=app=tasks -n ${DEV_PROJECT} || true"
+             sh "oc new-build --name=shopping --image-stream=jboss-eap70-openshift --binary=true --labels=app=shopping -n ${DEV_PROJECT} || true"
              // build image
-             sh "oc start-build tasks --from-dir=oc-build --wait=true -n ${DEV_PROJECT}"
+             sh "oc start-build shopping --from-dir=oc-build --wait=true -n ${DEV_PROJECT}"
              // deploy image
-             sh "oc new-app tasks:latest -n ${DEV_PROJECT}"
-             sh "oc expose svc/tasks -n ${DEV_PROJECT}"
-
+             sh "oc new-app shopping:latest -n ${DEV_PROJECT}"
+             sh "oc expose svc/shopping -n ${DEV_PROJECT}"
              stage 'Deploy STAGE'
              input message: "Promote to STAGE?", ok: "Promote"
              sh "oc project ${STAGE_PROJECT}"
              // tag for stage
-             sh "oc tag ${DEV_PROJECT}/tasks:latest ${STAGE_PROJECT}/tasks:${v}"
-             // clean up. keep the imagestream
-             sh "oc delete bc,dc,svc,route -l app=tasks -n ${STAGE_PROJECT}"
+            sh "oc tag ${DEV_PROJECT}/shopping:latest ${STAGE_PROJECT}/shopping:${v}"
+            // clean up. keep the imagestream
+            sh "oc scale deploymentconfig shopping --replicas=0"
+            sh "oc delete bc,dc,svc,route -l app=shopping -n ${STAGE_PROJECT}"
+            // deploy stage image
+            sh "oc adm policy add-cluster-role-to-user cluster-reader system:serviceaccount:stage:default"
+            sh "oc new-app shopping:${v} -n ${STAGE_PROJECT} -e OPENSHIFT_KUBE_PING_NAMESPACE=stage OPENSHIFT_KUBE_PING_LABELS=app=shopping JGROUPS_CLUSTER_PASSWORD=pwd"
+            sh "oc expose svc/shopping -n ${STAGE_PROJECT}"
+         }
+
+          def version() {
+            def matcher = readFile('pom.xml') =~ '<version>(.+)</version>'
+            matcher ? matcher[0][1] : null
+          }
+      type: JenkinsPipeline
+      type: Generic
+  status:
+    lastVersion: 0
+    # Pipeline short
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    labels:
+      app: cicd-pipeline
+      name: cicd-pipeline
+    name: shopping-pipeline-short
+  spec:
+    runPolicy: Serial
+    source:
+      type: None
+    strategy:
+      jenkinsPipelineStrategy:
+        jenkinsfile: |-
+          node('maven') {
+             // define commands
+             def mvnCmd = "mvn -s configuration/cicd-settings.xml"
+
+             stage 'Build'
+             git url: 'http://gogs:3000/gogs/openshift-shopping.git'
+             def v = version()
+             sh "${mvnCmd} clean install -DskipTests=true"
+             sh "rm -rf oc-build && mkdir -p oc-build/deployments"
+             sh "cp target/openshift-shopping.war oc-build/deployments/ROOT.war"
+             sh "oc project stage"
+             // create build. override the exit code since it complains about exising imagestream
+             sh "oc new-build --name=shopping-new --image-stream=jboss-eap70-openshift --binary=true --labels=app=shopping-new -n stage || true"
+             // build image
+             sh "oc start-build shopping-new --from-dir=oc-build --wait=true -n stage"
              // deploy stage image
-             sh "oc new-app tasks:${v} -n ${STAGE_PROJECT}"
-             sh "oc expose svc/tasks -n ${STAGE_PROJECT}"
+             sh "oc new-app shopping-new:latest -n stage --name shopping-new"
           }
 
           def version() {
@@ -390,24 +427,6 @@ objects:
     sessionAffinity: None
     type: ClusterIP
 - apiVersion: v1
-  kind: Service
-  metadata:
-    creationTimestamp: null
-    name: postgresql-gogs
-    labels:
-      app: gogs
-  spec:
-    ports:
-    - name: postgresql
-      port: 5432
-      protocol: TCP
-      targetPort: 5432
-    selector:
-      app: gogs
-      deploymentconfig: postgresql-gogs
-    sessionAffinity: None
-    type: ClusterIP
-- apiVersion: v1
   kind: Route
   metadata:
     annotations:
@@ -420,22 +439,9 @@ objects:
       kind: Service
       name: gogs
 - apiVersion: v1
-  kind: ImageStream
+  kind: ServiceAccount
   metadata:
     name: gogs
-    labels:
-      app: gogs
-  spec:
-    tags:
-    - annotations:
-        description: The Gogs git server docker image
-        tags: gogs,go,golang
-        version: "latest"
-      from:
-        kind: DockerImage
-        name: openshiftdemos/gogs:latest
-      importPolicy: {}
-      name: "latest"
 - apiVersion: v1
   kind: DeploymentConfig
   metadata:
@@ -448,144 +454,48 @@ objects:
       app: gogs
       deploymentconfig: gogs
     strategy:
-      type: Recreate
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
     template:
       metadata:
+        annotations:
+          openshift.io/container.gogs.image.entrypoint: '["docker/start.sh","/bin/s6-svscan","/app/gogs/docker/s6/"]'
         labels:
           app: gogs
           deploymentconfig: gogs
       spec:
         containers:
-        - image: " "
-          imagePullPolicy: Always
-          livenessProbe:
-            failureThreshold: 3
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            successThreshold: 1
-            httpGet:
-              port: 3000
-              path: /
-            timeoutSeconds: 1
+        - image: gogs/gogs
+          imagePullPolicy: IfNotPresent
           name: gogs
           ports:
           - containerPort: 3000
             protocol: TCP
-          resources:
-            limits:
-              memory: 512Mi
-          terminationMessagePath: /dev/termination-log
-          readinessProbe:
-            failureThreshold: 3
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            successThreshold: 1
-            httpGet:
-              port: 3000
-              path: /
-            timeoutSeconds: 1
-        dnsPolicy: ClusterFirst
-        restartPolicy: Always
-        securityContext: {}
-        terminationGracePeriodSeconds: 30
-    triggers:
-    - type: ConfigChange
-    - imageChangeParams:
-        automatic: true
-        containerNames:
-        - gogs
-        from:
-          kind: ImageStreamTag
-          name: gogs:latest
-      type: ImageChange
-  status: {}
-- apiVersion: v1
-  kind: DeploymentConfig
-  metadata:
-    creationTimestamp: null
-    labels:
-      app: gogs
-      deploymentconfig: postgresql-gogs
-    name: postgresql-gogs
-  spec:
-    replicas: 1
-    selector:
-      app: gogs
-      deploymentconfig: postgresql-gogs
-    strategy:
-      recreateParams:
-        timeoutSeconds: 600
-      resources: {}
-      type: Recreate
-    template:
-      metadata:
-        labels:
-          app: gogs
-          deploymentconfig: postgresql-gogs
-      spec:
-        containers:
-        - env:
-          - name: POSTGRESQL_USER
-            value: ${POSTGRESQL_USER}
-          - name: POSTGRESQL_PASSWORD
-            value: ${GOGS_POSTGRESQL_PASSWORD}
-          - name: POSTGRESQL_DATABASE
-            value: gogs
-          image: ' '
-          imagePullPolicy: IfNotPresent
-          livenessProbe:
-            failureThreshold: 3
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            successThreshold: 1
-            tcpSocket:
-              port: 5432
-            timeoutSeconds: 1
-          name: postgresql
-          ports:
-          - containerPort: 5432
-            protocol: TCP
-          readinessProbe:
-            exec:
-              command:
-              - /bin/sh
-              - -i
-              - -c
-              - psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c 'SELECT 1'
-            failureThreshold: 3
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          resources:
-            limits:
-              memory: 256Mi
-          securityContext:
-            capabilities: {}
-            privileged: false
+          resources: {}
           terminationMessagePath: /dev/termination-log
           volumeMounts:
-          - mountPath: /var/lib/pgsql/data
-            name: postgresql-data
+          - mountPath: /data
+            name: gogs-volume
+          securityContext:
+            privileged: true
         dnsPolicy: ClusterFirst
         restartPolicy: Always
         securityContext: {}
+        serviceAccount: gogs
+        serviceAccountName: gogs
         terminationGracePeriodSeconds: 30
         volumes:
         - emptyDir: {}
-          name: postgresql-data
+          name: gogs-volume
     triggers:
-    - imageChangeParams:
-        automatic: true
-        containerNames:
-        - postgresql
-        from:
-          kind: ImageStreamTag
-          name: postgresql:9.5
-          namespace: openshift
-      type: ImageChange
     - type: ConfigChange
-  status: {}
+#Install gogs
 - apiVersion: v1
   kind: Pod
   metadata:
@@ -631,27 +541,9 @@ objects:
       JENKINSSVC=$(oc get svc jenkins -o template --template='{{.spec.clusterIP}}')
 
       # Use the oc client to get the postgres and jenkins variables into the current shell
-      eval $(oc env dc/postgresql-gogs --list | grep -v \#)
       eval $(oc env dc/jenkins --list | grep -v \#)
 
-      # postgres has a readiness probe, so checking if there is at least one
-      # endpoint means postgres is alive and ready, so we can then attempt to install gogs
-      # we're willing to wait 60 seconds for it, otherwise something is wrong.
-      x=1
-      oc get ep postgresql-gogs -o yaml | grep "\- addresses:"
-      while [ ! $? -eq 0 ]
-      do
-        sleep 10
-        x=$(( $x + 1 ))
-
-        if [ $x -gt 100 ]
-        then
-          exit 255
-        fi
-
-        oc get ep postgresql-gogs -o yaml | grep "\- addresses:"
-      done
-
+      
       # now we wait for gogs to be ready in the same way
       x=1
       oc get ep gogs -o yaml | grep "\- addresses:"
@@ -667,33 +559,27 @@ objects:
 
         oc get ep gogs -o yaml | grep "\- addresses:"
       done
-
-      # we might catch the router before it's been updated, so wait just a touch
-      # more
+      
       sleep 10
-
-      # RETURN=$(curl -o /dev/null -sL -w "%{http_code}" http://$GOGSSVC:3000/install \
-      # RETURN=$(curl -o /dev/null -sL -v http://$GOGSSVC:3000/install \
+      # we might catch the router before it's been updated, so wait just a touch more
+  
       RETURN=$(curl -o /dev/null -sL --post302 -w "%{http_code}" http://$GOGSSVC:3000/install \
-      --form db_type=PostgreSQL \
-      --form db_host=postgresql-gogs:5432 \
-      --form db_user=$POSTGRESQL_USER \
-      --form db_passwd=$POSTGRESQL_PASSWORD \
-      --form db_name=gogs \
-      --form ssl_mode=disable \
+      --form db_type=SQLite3 \
       --form db_path=data/gogs.db \
       --form "app_name=Gogs: Go Git Service" \
-      --form repo_root_path=/home/gogs/gogs-repositories \
-      --form run_user=gogs \
+      --form repo_root_path=/data/git/gogs-repositories \
+      --form run_user=git \
       --form domain=localhost \
       --form ssh_port=22 \
       --form http_port=3000 \
       --form app_url=http://${GOGSROUTE}/ \
-      --form log_root_path=/opt/gogs/log \
+      --form log_root_path=/app/gogs/log \
       --form admin_name=gogs \
       --form admin_passwd=$GOGS_PASSWORD \
       --form admin_confirm_passwd=$GOGS_PASSWORD \
       --form admin_email=admin@gogs.com)
+
+   
 
       if [ $RETURN != "200" ]
       then
@@ -705,9 +591,9 @@ objects:
       # import github repository
       cat <<EOF > /tmp/data.json
       {
-        "clone_addr": "https://github.com/OpenShiftDemos/openshift-tasks.git",
+        "clone_addr": "https://github.com/bonocore/demoOcpClustered.git",
         "uid": 1,
-        "repo_name": "openshift-tasks"
+        "repo_name": "openshift-shopping"
       }
       EOF
 
@@ -722,26 +608,26 @@ objects:
       sleep 5
 
       # add webhook to Gogs to trigger pipeline on push
-      cat <<EOF > /tmp/data.json
-      {
-        "type": "gogs",
-        "config": {
-          "url": "http://admin:$JENKINS_PASSWORD@$JENKINSSVC/job/tasks-cd-pipeline/build?delay=0sec",
-          "content_type": "json"
-        },
-        "events": [
-          "push"
-        ],
-        "active": true
-      }
-      EOF
-      RETURN=$(curl -o /dev/null -sL -w "%{http_code}" -H "Content-Type: application/json" \
-      -u gogs:$GOGS_PASSWORD -X POST http://$GOGSSVC:3000/api/v1/repos/gogs/openshift-tasks/hooks -d @/tmp/data.json)
+      #cat <<EOF > /tmp/data.json
+      #{
+      #  "type": "gogs",
+      #  "config": {
+      #    "url": "http://admin:$JENKINS_PASSWORD@$JENKINSSVC/job/shopping-cd-pipeline/build?delay=0sec",
+      #    "content_type": "json"
+      #  },
+      #  "events": [
+      #    "push"
+      #  ],
+      #  "active": true
+      #}
+      #EOF
+      #RETURN=$(curl -o /dev/null -sL -w "%{http_code}" -H "Content-Type: application/json" \
+      #-u gogs:$GOGS_PASSWORD -X POST http://$GOGSSVC:3000/api/v1/repos/gogs/openshift-shopping/hooks -d @/tmp/data.json)
 
-      if [ $RETURN != "201" ]
-      then
-        exit 255
-      fi
+      #if [ $RETURN != "201" ]
+      #then
+      #  exit 255
+      #fi    
 # SonarQube
 - apiVersion: v1
   kind: Service
@@ -905,7 +791,7 @@ objects:
       deploymentconfig: sonarqube
     name: sonarqube
   spec:
-    replicas: 1
+    replicas: 0
     selector:
       app: sonarqube
       deploymentconfig: sonarqube
@@ -961,8 +847,7 @@ objects:
             timeoutSeconds: 5
           resources:
             limits:
-              cpu: 2
-              memory: 2Gi
+              memory: 1536Mi
           terminationMessagePath: /dev/termination-log
         dnsPolicy: ClusterFirst
         restartPolicy: Always

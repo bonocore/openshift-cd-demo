@@ -1,0 +1,23 @@
+#!/bin/bash
+
+oc project cicd 
+oc delete all -l template=cicd -n cicd --now=true
+oc delete all -l app=shopping -n dev --now=true
+oc delete template cicd -n cicd
+oc delete all -l app=shopping -n stage --now=true
+oc delete rolebinding default_edit -n cicd
+oc delete configmap gogs-install
+oc delete is tasks -n dev
+oc delete is tasks -n stage
+oc delete template cicd
+oc delete routes/jenkins 
+oc delete serviceaccount gogs
+oc project stage 
+oc delete dc/shopping-new
+oc delete is/shopping
+oc delete svc shopping-new
+oc delete bc/shopping-new
+oc delete is/shopping-new
+oc project cicd 
+oc create -f ./cicd-template.yaml 
+oadm policy add-scc-to-user privileged system:serviceaccount:cicd:gogs
