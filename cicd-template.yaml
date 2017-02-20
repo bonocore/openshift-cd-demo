@@ -99,17 +99,16 @@ objects:
              sh "oc expose svc/shopping -n ${DEV_PROJECT}"
              stage 'Deploy STAGE'
              input message: "Promote to STAGE?", ok: "Promote"
+             sh "oc scale deploymentconfig shopping --replicas=0"
              sh "oc project ${STAGE_PROJECT}"
              // tag for stage
-            sh "oc tag ${DEV_PROJECT}/shopping:latest ${STAGE_PROJECT}/shopping:${v}"
-            // clean up. keep the imagestream
-            sh "oc scale deploymentconfig shopping --replicas=0"
-            sh "oc delete bc,dc,svc,route -l app=shopping -n ${STAGE_PROJECT}"
-            // deploy stage image
-            sh "oc adm policy add-cluster-role-to-user cluster-reader system:serviceaccount:stage:default"
-            sh "oc new-app shopping:${v} -n ${STAGE_PROJECT} -e OPENSHIFT_KUBE_PING_NAMESPACE=stage OPENSHIFT_KUBE_PING_LABELS=app=shopping JGROUPS_CLUSTER_PASSWORD=pwd"
-            sh "oc expose svc/shopping -n ${STAGE_PROJECT}"
-         }
+             sh "oc tag ${DEV_PROJECT}/shopping:latest ${STAGE_PROJECT}/shopping:${v}"
+             // clean up. keep the imagestream
+             sh "oc delete bc,dc,svc,route -l app=shopping -n ${STAGE_PROJECT}"
+             // deploy stage image
+             sh "oc new-app shopping:${v} -n ${STAGE_PROJECT}"
+             sh "oc expose svc/shopping -n ${STAGE_PROJECT}"
+          }
 
           def version() {
             def matcher = readFile('pom.xml') =~ '<version>(.+)</version>'
@@ -410,7 +409,6 @@ objects:
   metadata:
     annotations:
       description: The Gogs server's http port
-      service.alpha.openshift.io/dependencies: '[{"name": "postgresql-gogs", "namespace": "", "kind": "Service"}]'
       service.openshift.io/infrastructure: "true"
     labels:
       app: gogs
@@ -704,7 +702,7 @@ objects:
       deploymentconfig: postgresql-sonarqube
     name: postgresql-sonarqube
   spec:
-    replicas: 1
+    replicas: 0
     selector:
       app: sonarqube
       deploymentconfig: postgresql-sonarqube

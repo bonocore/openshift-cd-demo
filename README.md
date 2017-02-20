@@ -23,7 +23,12 @@ The application used in this pipeline is a JAX-RS application which is available
 
 # Setup
 
-Follow these [instructions](ocp-3.3/docs/oc-cluster.md) in order to create a local OpenShift cluster. Otherwise using your current OpenShift cluster, create the following projects for CI/CD components, Dev and Stage environments:
+Follow these [instructions](ocp-3.3/docs/oc-cluster.md) in order to create a local OpenShift cluster.
+
+
+
+
+Then, create the following projects for CI/CD components, Dev and Stage environments:
 
   ```
   oc new-project dev --display-name="Tasks - Dev"
@@ -31,16 +36,20 @@ Follow these [instructions](ocp-3.3/docs/oc-cluster.md) in order to create a loc
   oc new-project cicd --display-name="CI/CD"
   ```
 
+
+
 Jenkins needs to access OpenShift API to discover slave images as well accessing container images. Grant Jenkins service account enough privileges to invoke OpenShift API for the created projects:
 
   ```
   oc policy add-role-to-user edit system:serviceaccount:cicd:default -n dev
   oc policy add-role-to-user edit system:serviceaccount:cicd:default -n stage
   ```
+
+
 Create the CI/CD components based on the provided template
 
   ```
-  oc process -f cicd-template.yaml | oc create -f -
+  oc create -f ./cicd-template.yaml
   ```
 
 To use custom project names, change `cicd`, `dev` and `stage` in the above commands to
@@ -49,9 +58,15 @@ your own names and use the following to create the demo:
 oc process -f cicd-template.yaml -v DEV_PROJECT=dev-project-name -v STAGE_PROJECT=stage-project-name | oc create -f - -n cicd-project-name
 ```
 
+To cleanup everything and restart from scratch, you can use the "cleanup-cicd" bash script provided
+
 __Note:__ you need ~8GB memory for running this demo.
 
 # Guide
+
+You can find a video walk through of the demo here: https://bluejeans.com/s/BcNMK/
+
+0. Before to start the demo, you have to start the sonaqube DB and then the sonarqube server (just set the replicas to 1 in the overview page, wait for the DB to be started, befoure launching the SonarQube server itself)
 
 1. A Jenkins pipeline is pre-configured which clones Tasks application source code from Gogs (running on OpenShift), builds, deploys and promotes the result through the deployment pipeline. In the CI/CD project, click on _Builds_ and then _Pipelines_ to see the list of defined pipelines. If the [tech preview pipeline feature](https://docs.openshift.com/container-platform/3.3/install_config/web_console_customization.html#web-console-enable-tech-preview-feature) is not enabled on your OpenShift cluster, go directly to the pipelines section with this url: https://OPENSHIFT.MASTER/console/project/cicd/browse/pipelines
 
@@ -91,6 +106,8 @@ __Note:__ you need ~8GB memory for running this demo.
 Pipeline in OpenShift 3.3 is a tech preview feature and disabled by default. The steps required to enable this feature is detailed in [OpenShift documentation](https://access.redhat.com/documentation/en/openshift-container-platform/3.3/paged/installation-and-configuration/chapter-29-customizing-the-web-console#web-console-enable-tech-preview-feature).
 
 # Troubleshoot
+
+* If new job fails to start (pipeline hangs and no logs are shown), just cleanup everything using the script provided, and start again from scratch
 
 * SonarQube sometimes fails to load quality profiles requires for static analysis.
   ```
