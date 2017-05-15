@@ -1,0 +1,16 @@
+#!/bin/bash 
+oc login -u system:admin
+oc delete is --all -n openshift
+oc create -f https://raw.githubusercontent.com/openshift/origin/master/examples/image-streams/image-streams-rhel7.json -n openshift
+oc create -f https://raw.githubusercontent.com/jboss-openshift/application-templates/master/jboss-image-streams.json -n openshift
+oc login -u developer
+oc new-project dev --display-name="Shopping - Dev"
+oc new-project stage --display-name="Shopping - Stage"
+oc policy add-role-to-user edit system:serviceaccount:cicd:default -n dev
+oc policy add-role-to-user edit system:serviceaccount:cicd:default -n stage
+oc new-project cicd --display-name="CI/CD"
+oc create -f ./cicd-template.yaml
+oc login -u system:admin
+oc adm policy add-scc-to-user privileged system:serviceaccount:cicd:gogs
+oc login -u developer
+
