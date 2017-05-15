@@ -23,12 +23,6 @@ parameters:
   value: password
   name: GOGS_PASSWORD
   required: true
-- description: Username for PostgreSQL backend
-  displayName: PostgreSQL User
-  from: user[A-Z0-9]{3}
-  generate: expression
-  name: POSTGRESQL_USER
-  required: true
 - description: DEV project name
   displayName: DEV project name
   value: dev

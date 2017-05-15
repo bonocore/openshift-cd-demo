@@ -20,4 +20,4 @@ oc delete bc/shopping-new
 oc delete is/shopping-new
 oc project cicd 
 oc create -f ./cicd-template.yaml 
-oadm policy add-scc-to-user privileged system:serviceaccount:cicd:gogs
+oc adm policy add-scc-to-user privileged system:serviceaccount:cicd:gogs
